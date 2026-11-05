@@ -1,0 +1,30 @@
+
+// v3 capture: keep references to v2 functions before v3 overrides hoist
+window._ssV2 = {
+    prepare: prepareStageEntities,
+    trigger: triggerActiveStageAnimation,
+    draw: drawStageFrame,
+    prepareNew: ssPrepareNew,
+    stepNew: ssStepNew,
+    open: openGameStage,
+    close: closeGameStage,
+    cannon: startCannonStrikeAnimation,
+    renderAll: renderAllDashboard,
+    qChange: ssQSourceChanged,
+    resetDef: resetToDefaultQuestions,
+    renderMystery: renderInteractiveMysteryBoxes,
+    openBox: openSpecificMysteryBox,
+    runMystery: runTurboMysteryBoxScan,
+    idleLoop: ssIdleLoop,
+    parsePptx: parseAndRenderExactPptxFile,
+    renderSlide: renderCurrentPptxSlide,
+    cardSVG: getModeCardSVG,
+    excelUp: handleExcelQuestionsUpload,
+    wordUp: handleWordQuestionsUpload,
+    delQFile: ssDeleteQFile,
+    renderQSelect: ssRenderQSelect,
+    renderQLib: ssRenderQLibrary,
+    loadQFile: ssLoadQFile,
+    mergeQFile: ssMergeQFile,
+    mergeAll: ssMergeAllQFiles
+};

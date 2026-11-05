@@ -1,0 +1,115 @@
+// Alforqan - Studio database schema (Neon PostgreSQL).
+// Same tables as the original deployment: schools, accounts, login_fail, portal_data, studio_data, decks.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model School {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  accounts   Account[]
+  portalData PortalData[]
+  studioData StudioData[]
+  decks      Deck[]
+
+  @@map("schools")
+}
+
+model Account {
+  id           Int      @id @default(autoincrement())
+  schoolId     Int      @map("school_id")
+  name         String
+  subject      String?
+  // admin | management | counselor | teacher
+  role         String
+  pinHash      String   @map("pin_hash")
+  tokenVersion Int      @default(1) @map("token_version")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@unique([schoolId, name])
+  @@index([schoolId], map: "idx_accounts_school")
+  @@map("accounts")
+}
+
+model LoginFail {
+  schoolId    Int       @map("school_id")
+  name        String
+  fails       Int       @default(0)
+  lockedUntil DateTime? @map("locked_until") @db.Timestamptz(6)
+
+  @@id([schoolId, name])
+  @@map("login_fail")
+}
+
+model PortalData {
+  schoolId    Int      @map("school_id")
+  teacherName String   @map("teacher_name")
+  json        Json
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  version     Int      @default(1)
+  mutationId  String?  @map("mutation_id")
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@id([schoolId, teacherName])
+  @@index([schoolId], map: "idx_portal_school")
+  @@map("portal_data")
+}
+
+model StudioData {
+  schoolId    Int      @map("school_id")
+  teacherName String   @map("teacher_name")
+  json        Json
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  version     Int      @default(1)
+  mutationId  String?  @map("mutation_id")
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@id([schoolId, teacherName])
+  @@index([schoolId], map: "idx_studio_school")
+  @@map("studio_data")
+}
+
+// Deck metadata. The uploaded file itself is in DeckFile (same database, no separate storage service).
+// Deleted decks keep their row as a tombstone (deleted = true) and their file is removed.
+model Deck {
+  schoolId  Int      @map("school_id")
+  owner     String
+  deckId    String   @map("deck_id")
+  name      String?
+  sizeBytes BigInt?  @map("size_bytes")
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(1)
+  deleted   Boolean  @default(false)
+
+  school School @relation(fields: [schoolId], references: [id])
+  file   DeckFile?
+
+  @@id([schoolId, owner, deckId])
+  @@index([schoolId, owner], map: "idx_decks_school_owner")
+  @@map("decks")
+}
+
+model DeckFile {
+  schoolId Int    @map("school_id")
+  owner    String
+  deckId   String @map("deck_id")
+  data     Bytes
+
+  deck Deck @relation(fields: [schoolId, owner, deckId], references: [schoolId, owner, deckId], onDelete: Cascade)
+
+  @@id([schoolId, owner, deckId])
+  @@map("deck_files")
+}
