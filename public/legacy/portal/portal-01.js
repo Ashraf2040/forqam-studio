@@ -2,16 +2,13 @@
 // ================= CORE DATA & LOGIN ENGINE =================
 const ADMINS = [];
 
-const TEACHER_PINS = {"Teacher": "12345"};
+const TEACHER_PINS = {};        // filled at runtime from the server registry
 
-const DEFAULT_TEACHER_SUBJECTS = {"Teacher": "Science"};
+const DEFAULT_TEACHER_SUBJECTS = {}; // filled at runtime from the server registry
 
-const ALL_SUBJECTS = [
-    "Science", "Math", "English", "French", "Arabic", "Islamic Studies",
-    "Social Studies", "Physics", "Chemistry", "Biology", "Computer", "Art", "PE"
-];
+const ALL_SUBJECTS = (window.SM_ROSTER && window.SM_ROSTER.subjects) || []; // the real school subjects
 
-const SCHOOL_CLASSES = {"DEMO CLASS": ["محمد الدالي","علي العتيبي","مروان الحربي","عبدالله الشهري","يوسف القحطاني","خالد المطيري","سعود الغامدي","فهد العنزي","ريان الزهراني","عمر باوزير","حسن باخشوين","طلال الدوسري","نايف العمري","سلطان الحارثي","ماجد السبيعي","تركي الشمري","بدر الرشيدي","زياد المالكي","أنس بركات","هاني جستنية","وليد عسيري","سامي بلبيد","فيصل كنفاني","عادل نور"]};
+const SCHOOL_CLASSES = {};      // filled at runtime from the device/server data (never hard-coded)
 
 const behaviors = [
     { id: 'leader', type: 'positive', icon: 'fa-solid fa-crown', color: '#2563eb', title: 'Leadership' },
@@ -113,7 +110,7 @@ function executeDirectLogin() {
         setStore(smk7('SMART_PORTAL_GENERAL_USER'), currentTeacher);
 
         const isAdminAcc = ADMINS.includes(tName);
-        const defaultSub = isAdminAcc ? "Administration" : (DEFAULT_TEACHER_SUBJECTS[tName] || "Science");
+        const defaultSub = isAdminAcc ? "Administration" : (DEFAULT_TEACHER_SUBJECTS[tName] || "");
 
         if (!globalData[currentTeacher]) {
             globalData[currentTeacher] = { subject: defaultSub, classes: {}, currentClass: "" };
@@ -137,16 +134,11 @@ function executeDirectLogin() {
 }
 
 function populateAllSchoolClasses(tObj) {
-    let base = Date.now();
-    Object.keys(SCHOOL_CLASSES).forEach((cName, cIdx) => {
-        if (!tObj.classes[cName]) {
-            tObj.classes[cName] = {
-                students: SCHOOL_CLASSES[cName].map((sName, sIdx) => ({ id: base + (cIdx * 100) + sIdx, name: sName })),
-                scores: {}, quizScores: {}, projectScores: {}, manualScores: {}, comments: {}, bulkCounts: {}, history: {}
-            };
-        }
-    });
-    tObj.currentClass = "GRADE 5C";
+    if (!tObj || typeof tObj !== 'object') return;
+    if (!tObj.classes) tObj.classes = {};
+    if (!tObj.currentClass || !tObj.classes[tObj.currentClass]) {
+        tObj.currentClass = Object.keys(tObj.classes)[0] || "";
+    }
 }
 
 function saveGlobal() {

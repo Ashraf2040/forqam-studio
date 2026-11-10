@@ -1575,7 +1575,8 @@ function sscDownload(blob, name) {
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
 }
 async function sscTemplate(kind) {
-    const names = ['Grade 5A', 'Grade 6B', 'Grade 7C'], ex = i => [1, 2, 3].map(n => 'Student ' + n + ' name');
+    const names = ((window.SM_ROSTER && window.SM_ROSTER.classes) || ['Class A', 'Class B', 'Class C']).slice(0, 3);
+    const ex = i => [1, 2, 3].map(n => 'Student ' + n + ' name');
     if (kind === 'csv') {
         const rows = [names.join(',')].concat([0, 1, 2].map(i => names.map(() => 'Student ' + (i + 1) + ' name').join(',')));
         return sscDownload(new Blob(['\uFEFF' + rows.join('\r\n')], { type: 'text/csv' }), 'SmartStudio_classes_template.csv');
@@ -2395,6 +2396,7 @@ function wh3Plan(a0) {
 function wh3Prepare() {
     let names = ss9Pool(24); if (!names.length) names = ['—'];
     WH.names = names; WH.win = Math.floor(Math.random() * names.length); WH.done = false; WH.f = 0; WH.fv = 0; WH.speed = 0; WH.flash = 0;
+    try { WH.dur = Math.max(140, Math.round(390 / (ssGetPace ? ssGetPace() : 1))); } catch (e) { WH.dur = 390; }
     wh3Plan(WH.a); WH.last = -1;
     ssG = { mode: 3, names, winnerIdx: WH.win, phase: 'idle', parts: [] }; stageTick = 0;
 }
@@ -2782,13 +2784,13 @@ function wh3Draw(ctx, W, H) {
     cvs.addEventListener('pointerdown', e => { e.preventDefault(); fit(); try { cvs.setPointerCapture(e.pointerId); } catch (x) {} cur = { c: color, w: eraser ? 30 : size, er: eraser, pts: [pos(e)] }; strokes.push(cur); seg(cur, 1); });
     cvs.addEventListener('pointermove', e => { if (!cur) return; const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e]; (evs.length ? evs : [e]).forEach(q => cur.pts.push(pos(q))); seg({ c: cur.c, w: cur.w, er: cur.er, pts: cur.pts.slice(-4) }, 1); });
     const up = () => { cur = null; ctx && (ctx.globalCompositeOperation = 'source-over'); }; cvs.addEventListener('pointerup', up); cvs.addEventListener('pointercancel', up);
-    tools.onclick = e => {
+    tools.onclick = async e => {
         const b = e.target.closest('button'); if (!b) return;
         if (b.dataset.c) { color = b.dataset.c; eraser = false; tools.querySelectorAll('.bdC').forEach(x => x.classList.toggle('on', x === b)); tools.querySelector('[data-a=eraser]').classList.remove('on'); }
         else if (b.dataset.s) { size = +b.dataset.s; tools.querySelectorAll('.bdSz').forEach(x => x.classList.toggle('on', x === b)); }
         else if (b.dataset.a === 'eraser') { eraser = !eraser; b.classList.toggle('on', eraser); }
         else if (b.dataset.a === 'undo') { strokes.pop(); redraw(); }
-        else if (b.dataset.a === 'clear') { if (!strokes.length || confirm('Clear the whole board?')) { strokes = []; redraw(); } }
+        else if (b.dataset.a === 'clear') { if (!strokes.length || await SSD.confirm('Clear board', 'Erase the whole board?', { danger: true, okLabel: 'Clear all' })) { strokes = []; redraw(); } }
         else if (b.dataset.a === 'bzin') { window.ssBdZoom(0.25); }
         else if (b.dataset.a === 'bzout') { window.ssBdZoom(-0.25); }
         else if (b.dataset.a === 'ruled') { ruled = !ruled; board.classList.toggle('ruled', ruled); b.classList.toggle('on', ruled); b.lastChild.textContent = ruled ? ' Ruled' : ' Blank'; }
@@ -2862,19 +2864,6 @@ function wh3Draw(ctx, W, H) {
         if (mounted !== v) { if (getComputedStyle(v).position === 'static') v.style.position = 'relative'; v.appendChild(board); v.appendChild(web); v.appendChild(bar); mounted = v; }
         const act = pv.classList.contains('active'); bar.style.display = act ? '' : 'none'; if (!act) { board.classList.remove('on'); web.classList.remove('on'); } else { board.classList.toggle('on', mode === 'board'); web.classList.toggle('on', mode === 'web'); }
     }, 400);
-})();
-
-// PREVIEW ONLY: demo roster so games show something when no real roster is loaded
-(function ss9Demo() {
-    try {
-        const cl = appState.classes || (appState.classes = {});
-        const total = Object.keys(cl).reduce((a, k) => a + ((cl[k] || []).length), 0);
-        if (total === 0) {
-            cl['DEMO CLASS'] = ['محمد الدالي','علي العتيبي','مروان الحربي','عبدالله الشهري','يوسف القحطاني','خالد المطيري','سعود الغامدي','فهد العنزي','ريان الزهراني','عمر باوزير','حسن باخشوين','طلال الدوسري','نايف العمري','سلطان الحارثي','ماجد السبيعي','تركي الشمري','بدر الرشيدي','زياد المالكي','أنس بركات','هاني جستنية','وليد عسيري','سامي بلبيد','فيصل كنفاني','عادل نور'];
-            appState.currentClass = 'DEMO CLASS';
-            if (typeof renderAllDashboard === 'function') renderAllDashboard();
-        }
-    } catch (e) {}
 })();
 
 // ---- v9 wiring ----
@@ -3100,7 +3089,7 @@ ss3BuildClawScene = ss9BuildClawScene;
 
     function questions() {
         let q = [];
-        try { if (S.src === 'cur') q = appState.questions || DEFAULT_QUESTIONS; else { const f = (ssQFiles() || []).find(x => x.id === S.src); q = f ? f.questions : []; } } catch (e) {}
+        try { if (S.src === 'cur') q = appState.questions || []; else { const f = (ssQFiles() || []).find(x => x.id === S.src); q = f ? f.questions : []; } } catch (e) {}
         return (q || []).filter(x => x && x.q);
     }
     function blanksOf(q) { const out = []; String(q).replace(/<strong>(.*?)<\/strong>|<b>(.*?)<\/b>|\*\*(.*?)\*\*/gi, (m, a, b, c) => { out.push(a || b || c); return m; }); return out; }
@@ -3117,7 +3106,7 @@ ss3BuildClawScene = ss9BuildClawScene;
 <div class="tcN" id="tcN">${[2, 3, 4].map(n => `<button data-n="${n}" class="${S.n === n ? 'on' : ''}">${n}</button>`).join('')}</div>
 <div class="tcNames" id="tcNames"></div>
 <label>Questions (one numbered tile for each question)
-<select id="tcSrc"><option value="cur">▶ ${esc((typeof ssQSourceName === 'function' ? ssQSourceName() : 'Current questions'))} (${(appState.questions || DEFAULT_QUESTIONS).length} Q)</option>${files.map(f => `<option value="${esc(f.id)}"${S.src === f.id ? ' selected' : ''}>📁 ${esc(f.name)} (${(f.questions || []).length} Q)</option>`).join('')}</select></label>
+<select id="tcSrc"><option value="cur">▶ ${esc((typeof ssQSourceName === 'function' ? ssQSourceName() : 'Current questions'))} (${(appState.questions || []).length} Q)</option>${files.map(f => `<option value="${esc(f.id)}"${S.src === f.id ? ' selected' : ''}>📁 ${esc(f.name)} (${(f.questions || []).length} Q)</option>`).join('')}</select></label>
 <div style="display:flex;gap:10px;flex-wrap:wrap">
 <label style="flex:1;min-width:140px">Tiles on the board<input type="number" id="tcCount" min="2" max="60" value="${Math.min(S.count, Math.max(2, qn)) }"></label>
 <label style="flex:1;min-width:140px">Points per question<select id="tcPts">${[1, 2, 5, 10, 20, 50, 100].map(p => `<option value="${p}"${S.pts === p ? ' selected' : ''}>${p}</option>`).join('')}</select></label></div>
@@ -3160,7 +3149,7 @@ ss3BuildClawScene = ss9BuildClawScene;
             const tm = e.target.closest('.tcTeam'); if (tm) { S.turn = +tm.dataset.t; render(); }
         };
         root.querySelectorAll('input.nm').forEach(inp => { inp.oninput = () => { S.names[+inp.dataset.i] = inp.value; }; inp.onclick = e => e.stopPropagation(); });
-        root.querySelector('#tcX').onclick = close; root.querySelector('#tcSet').onclick = () => { if (confirm('Start a new game? Scores will be reset.')) showSetup(); };
+        root.querySelector('#tcX').onclick = close; root.querySelector('#tcSet').onclick = async () => { if (await SSD.confirm('New game', 'Start a new game?\nScores will be reset.', { danger: true, okLabel: 'New game' })) showSetup(); };
         root.querySelector('#tcEnd').onclick = showWinner;
         root.querySelector('.tcBoard').onclick = e => { const b = e.target.closest('.tcTile'); if (b && !b.disabled) openTile(+b.dataset.i); };
     }

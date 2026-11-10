@@ -34,11 +34,11 @@ function ssDownloadBackup() {
 function ssRestoreBackup(ev) {
     const f = ev.target.files && ev.target.files[0]; if (!f) return;
     const r = new FileReader();
-    r.onload = () => {
+    r.onload = async () => {
         try {
             const d = JSON.parse(r.result); const st = d.appState || d;
             if (!st || typeof st !== 'object' || !st.classes) throw new Error('bad');
-            if (!confirm('Replace the data on this device with the backup file? (A copy of current data is kept in the device backup.)')) return;
+            if (!(await SSD.confirm('Restore backup', 'Replace the data on this device with the backup file?\n(A copy of current data is kept in the device backup.)', { danger: true, okLabel: 'Restore now' }))) return;
             ssStatePut('before-restore', JSON.parse(JSON.stringify(appState)));
             appState = Object.assign({}, appState, st); syncStudioData(); renderAllDashboard(); showToast('✅ Backup restored');
         } catch (e) { showToast('⚠️ Not a valid backup file'); }

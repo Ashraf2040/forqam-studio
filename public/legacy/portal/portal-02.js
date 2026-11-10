@@ -1259,12 +1259,13 @@ function applyBulkBehavior(behaviorObj, mode) {
     else showToast(`Removed "${behaviorObj.title}" (-1) from ALL students`, true);
 }
 
-function clearAllClassInteractions() {
+async function clearAllClassInteractions() {
     if (isReadOnlyView()) return;
     const act = getActiveData();
     if (!act) return;
     const targetLabel = isHistoryMode ? `Archive Day (${historyDate})` : `Class (${appData.currentClass})`;
-    if (!confirm(`هل أنت متأكد من مسح جميع التفاعلات للفصل بالكامل في ${targetLabel}؟\n\nاضغط OK للمسح أو Cancel للتراجع.`)) return;
+    const okc = await SSD.confirm('Clear all interactions?', `Delete every interaction for the entire class in ${targetLabel}?\n\nهذا سيمسح جميع التفاعلات للفصل بالكامل.`, { danger: true, okLabel: 'Yes, clear all' });
+    if (!okc) return;
 
     act.scores = {};
     act.manualScores = {};
@@ -1476,11 +1477,18 @@ function renderClass() {
 
 function updateQ(id, val) { if (isReadOnlyView()) return; const a = getActiveData(); if (!a.quizScores) a.quizScores = {}; a.quizScores[id] = val; saveGlobal(); renderClass(); }
 function updateP(id, val) { if (isReadOnlyView()) return; const a = getActiveData(); if (!a.projectScores) a.projectScores = {}; a.projectScores[id] = val; saveGlobal(); renderClass(); }
-function manualPerc(id, name) {
+async function manualPerc(id, name) {
     if (isReadOnlyView()) return;
     const a = getActiveData(); if (!a.manualScores) a.manualScores = {};
     const currentVal = (a.manualScores[id] !== undefined) ? a.manualScores[id] : '';
-    const raw = prompt(`أدخل النسبة اليدوية للطالب (${name}) من 0 إلى 100 (يمكنك كتابة نسبة أقل من 70 مثل 50 أو 60):\n\nاترك الخانة فارغة واضغط OK للعودة للحساب التلقائي.`, currentVal);
+    const raw = await SSD.prompt(`Manual percentage — ${name}`, {
+        message: `Set a manual % from 0 to 100 (below 70 is allowed, e.g. 50 or 60).\n\nاترك الخانة فارغة واضغط Save للعودة إلى الحساب التلقائي.`,
+        initial: String(currentVal || ''),
+        placeholder: 'e.g. 75 — empty = back to Auto',
+        hint: 'Empty field + Save = return to automatic calculation',
+        okLabel: 'Save',
+        requireNonEmpty: false
+    });
     if (raw === null) return;
     const cleaned = raw.trim().replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace('%', '');
     if (cleaned === '') {
@@ -1496,9 +1504,10 @@ function manualPerc(id, name) {
     }
     saveGlobal(); renderClass();
 }
-function resetStu(id) {
+async function resetStu(id) {
     if (isReadOnlyView()) return;
-    if (!confirm("هل تريد مسح جميع تفاعلات هذا الطالب؟ (OK للمسح / Cancel للتراجع)")) return;
+    const okr = await SSD.confirm('Reset student interactions?', 'Clear ALL interactions of this student?\n\nهل تريد مسح جميع تفاعلات هذا الطالب؟', { danger: true, okLabel: 'Yes, reset' });
+    if (!okr) return;
     const a = getActiveData();
     if (a.scores) delete a.scores[id];
     if (a.quizScores) delete a.quizScores[id];
@@ -1507,9 +1516,9 @@ function resetStu(id) {
     saveGlobal(); renderClass();
     showToast("Student interactions reset", true);
 }
-function delStu(id) {
+async function delStu(id) {
     if (isReadOnlyView()) return;
-    if (!confirm("Delete student from class?")) return;
+    if (!(await SSD.confirm('Remove student', 'Delete this student from the class?', { danger: true, okLabel: 'Delete' }))) return;
     appData.classes[appData.currentClass].students = appData.classes[appData.currentClass].students.filter(s => s.id !== id);
     saveGlobal(); renderClass();
 }
@@ -1521,9 +1530,9 @@ function addStudent() {
         inp.value = ''; saveGlobal(); renderClass(); buildAutocompleteList();
     }
 }
-function promptNewCustomClass() {
+async function promptNewCustomClass() {
     if (isReadOnlyView()) return;
-    const n = prompt("Enter new class name:");
+    const n = await SSD.prompt('New class', { message: 'Give the new classroom a name:', placeholder: 'e.g. 5C', okLabel: 'Create class' });
     if (n && n.trim()) {
         appData.classes[n.trim()] = { students: [], scores: {}, quizScores: {}, projectScores: {}, manualScores: {}, comments: {}, history: {} };
         appData.currentClass = n.trim();
@@ -1531,9 +1540,9 @@ function promptNewCustomClass() {
         openMainDashboard();
     }
 }
-function deleteCurrentClass() {
+async function deleteCurrentClass() {
     if (isReadOnlyView()) return;
-    if (confirm(`Delete ${appData.currentClass}?`)) {
+    if (await SSD.confirm('Delete class', `Permanently delete "${appData.currentClass}" and all its records?`, { danger: true, okLabel: 'Delete class' })) {
         delete appData.classes[appData.currentClass];
         appData.currentClass = Object.keys(appData.classes)[0] || "";
         saveGlobal(); renderNavbar(); renderClass();
@@ -1576,7 +1585,7 @@ function renderLeaderboard() {
     }
 }
 
-function saveAndClearDay() {
+async function saveAndClearDay() {
     if (isReadOnlyView()) return;
     if (isHistoryMode) {
         showToast(`All edits to (${historyDate}) are already auto-saved!`, false);
@@ -1587,10 +1596,10 @@ function saveAndClearDay() {
     if (!cls.history) cls.history = {};
 
     const confirmMsg = cls.history[d]
-        ? `يوجد سجل محفوظ مسبقاً ليوم (${d}).\nهل تريد استبداله وحفظ التفاعلات الحالية وتفريغ السبورة ليوم جديد؟\n\n(اضغط OK للتأكيد أو Cancel للتراجع)`
-        : `هل تريد حفظ تفاعلات اليوم بتاريخ (${d}) وتفريغ السبورة لبدء يوم جديد؟\n\n(اضغط OK للحفظ أو Cancel للتراجع والإلغاء)`;
+        ? `An entry for (${d}) is already archived.\nReplace it, save today's interactions and start a new empty board?\n\nستتم استبدال السجل المحفوظ ليوم (${d}).`
+        : `Save today's interactions under (${d}) and clear the board for a new day?\n\nحفظ تفاعلات اليوم وإفراغ السبورة ليوم جديد؟`;
 
-    if (!confirm(confirmMsg)) {
+    if (!(await SSD.confirm(cls.history[d] ? 'Replace archived day?' : 'Save & clear the board?', confirmMsg, { okLabel: 'Save day', danger: cls.history[d] === undefined ? false : true }))) {
         showToast("تم إلغاء الحفظ (لم يتم مسح السبورة)", false);
         return;
     }
@@ -1608,9 +1617,9 @@ function saveAndClearDay() {
     showToast(`Saved day ${d} & cleared board!`, false);
 }
 
-function deleteHistoryDay(d) {
+async function deleteHistoryDay(d) {
     if (isReadOnlyView()) return;
-    if (!confirm(`هل تريد حذف سجل يوم (${d}) نهائياً من الأرشيف؟\n\n(OK للحذف / Cancel للتراجع)`)) return;
+    if (!(await SSD.confirm('Delete archived day', `Permanently delete the archive of (${d})?`, { danger: true, okLabel: 'Delete forever' }))) return;
     const cls = appData.classes[appData.currentClass];
     if (cls && cls.history) delete cls.history[d];
     isHistoryMode = false;
@@ -2106,7 +2115,12 @@ async function handleImport(event) {
         }
         names = names.map(n => n ? String(n).trim() : '').filter(n => n.length > 1);
         if (names.length > 0) {
-            const cName = prompt(`Found ${names.length} students. Enter class name:`, file.name.replace(/\.[^/.]+$/, ""));
+            const cName = await SSD.prompt(`Import ${names.length} students`, {
+                message: 'Name this new class:',
+                initial: file.name.replace(/\.[^/.]+$/, ''),
+                placeholder: 'e.g. 5C',
+                okLabel: 'Import class'
+            });
             if (cName) {
                 appData.classes[cName] = {
                     students: names.map((n, i) => ({ id: Date.now() + i, name: n })),

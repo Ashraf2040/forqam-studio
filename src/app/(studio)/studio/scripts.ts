@@ -4,6 +4,8 @@ export const scripts: string[] = [
   "/legacy/vendor/mammoth.js",
   "/legacy/vendor/jszip.js",
   "/legacy/vendor/three.js",
+  "/legacy/shell/ss-dialogs.js",
+  "/legacy/roster-data.js",
   "/legacy/transport.js",
   "/legacy/studio/studio-01.js",
   "/legacy/studio/studio-02.js",

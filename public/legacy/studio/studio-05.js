@@ -2072,10 +2072,10 @@ function resetToDefaultQuestions() { ssAutoSnapshotCurrentQs(); window._ssV2.res
 function ssLoadQFile(id) { ssAutoSnapshotCurrentQs(); window._ssV2.loadQFile(id); }
 function ssMergeQFile(id) { ssAutoSnapshotCurrentQs(); window._ssV2.mergeQFile(id); }
 function ssMergeAllQFiles() { ssAutoSnapshotCurrentQs(); window._ssV2.mergeAll(); }
-function ssDeleteQFile(id) {
+async function ssDeleteQFile(id) {
     const f = ssQFiles().find(x => x.id === id);
     if (!f) return;
-    if (!confirm(`Delete "${f.name}" permanently? This cannot be undone.`)) return;
+    if (!(await SSD.confirm('Delete question file', `Delete "${f.name}" permanently?\nThis cannot be undone.`, { danger: true, okLabel: 'Delete forever' }))) return;
     window._ssV2.delQFile(id);
 }
 // ============================================================================
@@ -3036,8 +3036,13 @@ function tdRun() {
     StudioAudioManager.playSFX('select');
     function loop() {
         if (!isStageRunning) return;
-        stageTick++;
-        drawStageFrame(false);
+        // Game pace: run extra simulation steps per frame (speed > 1)
+        let steps = 1;
+        try { steps = Math.max(1, Math.round(ssGetPace())); } catch (e) {}
+        for (let i = 0; i < steps && isStageRunning; i++) {
+            stageTick++;
+            drawStageFrame(false);
+        }
         if (!isStageRunning) return;
         stageAnimFrame = requestAnimationFrame(loop);
     }

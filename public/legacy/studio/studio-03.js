@@ -559,22 +559,28 @@ function ssHoloStart() {
     StudioAudioManager.playSFX('select');
     function loop() {
         if (!isStageRunning || activeStageMode !== 7 || !HOLO.active) return;
-        HOLO.t++; stageTick++;
-        if (HOLO.t <= HOLO.dur) {
-            const p = HOLO.t / HOLO.dur, e = 1 - Math.pow(1 - p, 3);
-            SS.carAngle = HOLO.start + (HOLO.final - HOLO.start) * e;
-            if (HOLO.t % 10 === 0 && p < 0.9) StudioAudioManager.playSFX('click');
-        } else {
-            SS.carAngle = HOLO.final;
-            HOLO.focus = Math.min(1, HOLO.focus + 0.04);
-            if (HOLO.t === HOLO.dur + 1) { StudioAudioManager.playSFX('cheer'); document.getElementById('stageWinnerBanner').textContent = '🔮 Stopped in front: ' + stageEntities[HOLO.win].name; }
+        // Game pace: run extra simulation steps per frame (speed > 1)
+        let steps = 1;
+        try { steps = Math.max(1, Math.round(ssGetPace())); } catch (e) {}
+        for (let i = 0; i < steps && isStageRunning; i++) {
+            HOLO.t++; stageTick++;
+            if (HOLO.t <= HOLO.dur) {
+                const p = HOLO.t / HOLO.dur, e = 1 - Math.pow(1 - p, 3);
+                SS.carAngle = HOLO.start + (HOLO.final - HOLO.start) * e;
+                if (HOLO.t % 10 === 0 && p < 0.9) StudioAudioManager.playSFX('click');
+            } else {
+                SS.carAngle = HOLO.final;
+                HOLO.focus = Math.min(1, HOLO.focus + 0.04);
+                if (HOLO.t === HOLO.dur + 1) { StudioAudioManager.playSFX('cheer'); document.getElementById('stageWinnerBanner').textContent = '🔮 Stopped in front: ' + stageEntities[HOLO.win].name; }
+            }
+            if (HOLO.t === HOLO.dur + 100) {
+                HOLO.done = true;
+                drawStageFrame(false);
+                ssCrownWinner(stageEntities[HOLO.win].name, '🔮', 'HOLOGRAM CARD WINNER', `🔮 Winner: ${stageEntities[HOLO.win].name}!`);
+                return;
+            }
         }
         drawStageFrame(false);
-        if (HOLO.t === HOLO.dur + 100) {
-            HOLO.done = true;
-            ssCrownWinner(stageEntities[HOLO.win].name, '🔮', 'HOLOGRAM CARD WINNER', `🔮 Winner: ${stageEntities[HOLO.win].name}!`);
-            return;
-        }
         stageAnimFrame = requestAnimationFrame(loop);
     }
     stageAnimFrame = requestAnimationFrame(loop);
@@ -1255,8 +1261,14 @@ function ssRunNewMode(forcedName) {
     StudioAudioManager.playSFX('select');
     function loop() {
         if (!isStageRunning) return;
-        stageTick++;
-        ssStepNew();
+        // Game pace: run extra simulation steps per frame for speed > 1
+        // (keeps every integer-tick trigger intact while animating faster).
+        let steps = 1;
+        try { steps = Math.max(1, Math.round(ssGetPace())); } catch (e) {}
+        for (let i = 0; i < steps && isStageRunning; i++) {
+            stageTick++;
+            ssStepNew();
+        }
         if (!isStageRunning) return;
         drawStageFrame(false);
         stageAnimFrame = requestAnimationFrame(loop);
@@ -2353,6 +2365,105 @@ function resetToDefaultQuestions() {
 function renderAllDashboard() {
     window._ssOrig.renderAll();
     ssRenderQSelect();
+}
+
+// ---- paste-import: parse plain text into MCQ / blanks questions ----
+function ssParsePastedQuestions(raw) {
+    const out = [];
+    const blocks = raw.split(/\n\s*\n+/).map(s => s.trim()).filter(Boolean);
+    blocks.forEach((block) => {
+        const lines = block.split(/\n+/).map(s => s.trim()).filter(Boolean);
+        // one-line pipe format:  Question | A | B | C | D | B   (or 1-4 index)
+        if (lines.length === 1 && (lines[0].match(/\|/g) || []).length >= 3) {
+            const parts = lines[0].split('|').map(s => s.trim()).filter(Boolean);
+            if (parts.length >= 4) {
+                const tail = parts[parts.length - 1].toUpperCase();
+                let ansIdx = parseInt(tail, 10);
+                if (isNaN(ansIdx)) ansIdx = ['A', 'B', 'C', 'D'].indexOf(tail);
+                if (ansIdx === -1) ansIdx = (tail === 'TRUE') ? 0 : (tail === 'FALSE') ? 1 : -1;
+                if (ansIdx !== -1) {
+                    const opts = parts.slice(1, -1).slice(0, 4);
+                    if (opts.length >= 2) {
+                        ansIdx = Math.max(0, Math.min(opts.length - 1, ansIdx - 1));
+                        out.push({ type: 'mcq', q: parts[0], opts, ans: ansIdx });
+                        return;
+                    }
+                }
+            }
+        }
+        // lettered-option format:
+        const isOpt = (l) => /^(?:[A-Da-d1-4]\s*[).:\-]|[-•]\s)/.test(l);
+        const qLine = lines.find(l => !isOpt(l) && !/^(ans(wer)?|الجواب)\s*[:\-]/i.test(l));
+        const optLines = lines.filter(isOpt);
+        let ansIdx = -1;
+        const ansLine = lines.find(l => /^(ans(wer)?|الإجابة|الجواب)\s*[:\-]/i.test(l));
+        if (ansLine) {
+            const t = ansLine.split(/[:\-]/).slice(1).join(':').trim().toUpperCase();
+            if (/^[1-4]$/.test(t)) ansIdx = parseInt(t, 10) - 1;
+            else {
+                const ai = ['A', 'B', 'C', 'D'].indexOf((t[0] || '').replace(/\*/g, ''));
+                ansIdx = ai;
+            }
+        }
+        if (ansIdx === -1) {
+            const starred = optLines.findIndex(l => /\*|✅|✔/.test(l));
+            if (starred >= 0) ansIdx = starred;
+        }
+        const opts = optLines.slice(0, 4)
+            .map(l => l.replace(/^(?:[A-Da-d1-4]\s*[).:\-]|[-•]\s)/, '')
+                .replace(/\*|✅|✔/g, '').trim())
+            .filter(Boolean);
+        if (qLine && opts.length >= 2) {
+            out.push({ type: 'mcq', q: qLine, opts, ans: ansIdx >= 0 ? Math.min(ansIdx, opts.length - 1) : 0 });
+        } else if (qLine) {
+            // no options → fill-in-the-blanks (supports **bold** hidden answers)
+            out.push({ type: 'blanks', q: qLine.replace(/^\*\*|\*\*$/g, '') });
+        } else if (block.length > 4) {
+            out.push({ type: 'blanks', q: block });
+        }
+    });
+    return out;
+}
+function ssQuickPasteQuestions() {
+    const ta = document.getElementById('ssPasteQuestionsTextarea');
+    if (!ta) return;
+    const raw = ta.value.trim();
+    if (!raw) return showToast('📋 Paste some questions into the box first.');
+    const imported = ssParsePastedQuestions(raw);
+    if (imported.length === 0) {
+        return showToast('⚠️ No questions recognized. Tip: mark answers with * or write "Answer: B".');
+    }
+    const name = 'Pasted Questions';
+    const __qfSaved = ssSaveQFile(name, imported);
+    appState.questions = imported;
+    appState.qIndex = 0;
+    ssSetQSource(`${name} (${imported.length})`);
+    syncStudioData();
+    renderArenaQuestion();
+    ssRenderQLibrary(); ssRenderQSelect();
+    document.getElementById('smartImportModal').style.display = 'none';
+    switchPortal('quiz');
+    StudioAudioManager.playSFX('select');
+    showToast(__qfSaved === false ? `⚠️ Library full — ${imported.length} questions loaded for this session only` : `✅ Imported ${imported.length} questions from text — ready to play!`);
+    ta.value = '';
+}
+function ssLoadPasteExample() {
+    const ta = document.getElementById('ssPasteQuestionsTextarea');
+    if (!ta) return;
+    ta.value =
+        'Which planet is closest to the Sun?\nA) Venus\nB) Mercury *\nC) Mars\nD) Earth\n\n' +
+        'Water freezes at what temperature in Celsius? | 0 | 50 | 100 | -10 | A\n\n' +
+        'The largest planet of the solar system is **Jupiter**.\n\n' +
+        'What is the chemical symbol of gold?\n1) Au ✅\n2) Ag \n3) Fe \n4) Gd\n\n' +
+        'Identify the polygon with eight sides. Options: hexagon, octagon, heptagon, nonagon. Answer: B';
+    ta.focus();
+    showToast('💡 Example loaded — edit it or press "Import my questions now"');
+}
+function ssFocusPasteImport() {
+    const box = document.getElementById('ssPasteImportBox');
+    const ta = document.getElementById('ssPasteQuestionsTextarea');
+    if (box) box.style.display = 'block';
+    if (ta) ta.focus();
 }
 
 // ============================================================================

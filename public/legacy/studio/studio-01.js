@@ -262,29 +262,15 @@ try {
     }
 } catch (e) {}
 
-const SCHOOL_CLASSES = {
-    "Grade 5C": [],
-    "Grade 6C": [],
-    "Grade 7C": [],
-    "Grade 8C": [],
-    "Grade 9C": [],
-    "Grade 10C": [],
-    "Grade 11C": [],
-    "Grade 12C": []
-};
-
-const DEFAULT_QUESTIONS = [
-    { type: 'mcq', q: "What is the SI unit of electrical resistance?", opts: ["Volt (V)", "Ampere (A)", "Ohm (Ω)", "Watt (W)"], ans: 2 },
-    { type: 'blanks', q: "According to Newton's Second Law, Force equals **Mass** multiplied by **Acceleration**." },
-    { type: 'mcq', q: "Which subatomic particle carries a negative electrical charge?", opts: ["Proton", "Neutron", "Electron", "Positron"], ans: 2 },
-    { type: 'blanks', q: "Light travels fastest in a **Vacuum** at a speed of **300,000** km/s." },
-    { type: 'mcq', q: "Which planet is known as the Red Planet in our Solar System?", opts: ["Venus", "Mars", "Jupiter", "Saturn"], ans: 1 }
-];
+// No predefined questions: teachers build their own banks (Smart Import / the
+// questions template). The active list starts empty; the lesson packs live in
+// the DB (questionFiles) or in the teacher's template xlsx imports.
+const DEFAULT_QUESTIONS = [];
 
 let appState = {
     pin: "12345",
-    currentClass: "Grade 7C",
-    classes: JSON.parse(JSON.stringify(SCHOOL_CLASSES)),
+    currentClass: "",
+    classes: {},
     pickedByClass: {},
     groups: { 1: [], 2: [], 3: [], 4: [], 5: [] },
     groupPts: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
@@ -302,8 +288,8 @@ try {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
             appState = Object.assign({}, appState, parsed);
-            if (!appState.classes || Object.keys(appState.classes).length === 0) {
-                appState.classes = JSON.parse(JSON.stringify(SCHOOL_CLASSES));
+            if (!appState.classes || typeof appState.classes !== 'object') {
+                appState.classes = {};
             }
             if (!appState.groups) appState.groups = { 1: [], 2: [], 3: [], 4: [], 5: [] };
             if (!appState.groupPts) appState.groupPts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -317,7 +303,7 @@ if (db) {
             const val = snap.val();
             if (val && typeof val === 'object') {
                 appState = Object.assign({}, appState, val);
-                if (!appState.classes) appState.classes = JSON.parse(JSON.stringify(SCHOOL_CLASSES));
+                if (!appState.classes) appState.classes = {};
                 if (!appState.groups) appState.groups = { 1: [], 2: [], 3: [], 4: [], 5: [] };
                 localStorage.setItem(smk7('SMART_STUDIO_GENERAL_PRO'), JSON.stringify(appState));
                 if (document.getElementById('studioMainShell').style.display !== 'none') {
@@ -348,8 +334,10 @@ function showToast(msg) {
 // 3. NO-REPEAT STUDENT POOL ENGINE
 // ============================================================================
 function getActiveStudents() {
-    if (!appState.classes || !appState.classes[appState.currentClass]) {
-        appState.currentClass = Object.keys(SCHOOL_CLASSES)[0];
+    if (!appState.classes || typeof appState.classes !== 'object') appState.classes = {};
+    if (!appState.classes[appState.currentClass]) {
+        const ks = Object.keys(appState.classes);
+        appState.currentClass = ks.length ? ks[0] : "";
     }
     return appState.classes[appState.currentClass] || [];
 }
@@ -893,28 +881,30 @@ function triggerActiveStageAnimation() {
 
     function loopStage() {
         if (!isStageRunning) return;
-        stageTick++;
-
-        if (activeStageMode === 8) {
-            updateBombTossPhysics();
-            drawStageFrame(false);
-            if (!bombState.exploded || bombState.shockwaveR < 220) {
-                stageAnimFrame = requestAnimationFrame(loopStage);
-            } else {
-                finishStageAndCrownWinner();
+        // Game pace: run extra simulation steps per frame (speed > 1)
+        let steps = 1;
+        try { steps = Math.max(1, Math.round(ssGetPace())); } catch (e) {}
+        for (let i = 0; i < steps; i++) {
+            stageTick++;
+            if (activeStageMode === 8) {
+                updateBombTossPhysics();
+                if (bombState.exploded && bombState.shockwaveR >= 220) {
+                    drawStageFrame(false);
+                    finishStageAndCrownWinner();
+                    return;
+                }
+                continue;
             }
-            return;
+            if (stageTick % 12 === 0) StudioAudioManager.playSFX('click');
+            const maxFrames = activeStageMode === 1 ? 140 : 125;
+            if (stageTick >= maxFrames) {
+                drawStageFrame(false);
+                finishStageAndCrownWinner();
+                return;
+            }
         }
-
-        if (stageTick % 12 === 0) StudioAudioManager.playSFX('click');
         drawStageFrame(false);
-
-        const maxFrames = activeStageMode === 1 ? 140 : 125;
-        if (stageTick < maxFrames) {
-            stageAnimFrame = requestAnimationFrame(loopStage);
-        } else {
-            finishStageAndCrownWinner();
-        }
+        stageAnimFrame = requestAnimationFrame(loopStage);
     }
     stageAnimFrame = requestAnimationFrame(loopStage);
 }
@@ -1946,8 +1936,11 @@ function changeQuizFontSize(delta) {
 }
 
 function renderArenaQuestion() {
-    const list = appState.questions || DEFAULT_QUESTIONS;
-    if (list.length === 0) return;
+    const list = appState.questions || [];
+    if (list.length === 0) {
+        try { document.getElementById('arenaStatusMsg').textContent = 'No questions yet — open 📥 Smart Import to add your question bank.'; } catch (e) {}
+        return;
+    }
     if (appState.qIndex >= list.length) appState.qIndex = 0;
 
     const qObj = list[appState.qIndex];
@@ -2011,7 +2004,7 @@ function checkArenaAnswer(chosenIdx, correctIdx) {
 }
 
 function useArena5050() {
-    const qObj = (appState.questions || DEFAULT_QUESTIONS)[appState.qIndex];
+    const qObj = (appState.questions || [])[appState.qIndex];
     if (!qObj || qObj.type === 'blanks') return;
     let wrongs = [0, 1, 2, 3].filter(i => i !== qObj.ans).sort(() => Math.random() - 0.5).slice(0, 2);
     wrongs.forEach(idx => {
@@ -2035,7 +2028,8 @@ function deleteCurrentArenaQuestion() {
 
 function nextArenaQuestion() {
     StudioAudioManager.playSFX('click');
-    const list = appState.questions || DEFAULT_QUESTIONS;
+    const list = appState.questions || [];
+    if (!list.length) return showToast('⚠️ No questions yet — import your question bank first');
     appState.qIndex = (appState.qIndex + 1) % list.length;
     renderArenaQuestion();
     startArenaTimer(30);
@@ -2043,15 +2037,47 @@ function nextArenaQuestion() {
 
 function prevArenaQuestion() {
     StudioAudioManager.playSFX('click');
-    const list = appState.questions || DEFAULT_QUESTIONS;
+    const list = appState.questions || [];
+    if (!list.length) return showToast('⚠️ No questions yet — import your question bank first');
     appState.qIndex = (appState.qIndex - 1 + list.length) % list.length;
     renderArenaQuestion();
     startArenaTimer(30);
 }
 
+// ============================================================================
+// GAME PACE — global speed multiplier (1 = normal, 2.2 = turbo)
+// Speeds up the question countdown, the wheel spin and every "slow moment".
+// Persisted on this device; share it with the whole page via window.SS_PACE.
+// ============================================================================
+function ssGetPace() {
+    try { const v = parseFloat(localStorage.getItem('SM_SGE_PACE')); return (!v || !isFinite(v) || v < 0.5) ? 1 : Math.min(3, v); }
+    catch (e) { const v = window.SS_PACE; return (!v || !isFinite(v) || v < 0.5) ? 1 : Math.min(3, v); }
+}
+function ssSetPace(v) {
+    v = (!v || !isFinite(v) || v < 0.5) ? 1 : Math.min(3, v);
+    try { localStorage.setItem('SM_SGE_PACE', String(v)); } catch (e) {}
+    try { window.SS_PACE = v; } catch (e) {}
+    try { if (typeof renderPaceSetting === 'function') renderPaceSetting(); } catch (e) {}
+    try { showToast('⚙️ Game speed: ' + (v === 1 ? 'Normal (1×)' : (v + '× — faster questions & wheel'))); StudioAudioManager.playSFX('select'); } catch (e) {}
+}
+function ssInitPace() {
+    try { window.SS_PACE = ssGetPace(); } catch (e) { window.SS_PACE = 1; }
+    try { if (typeof renderPaceSetting === 'function') renderPaceSetting(); } catch (e) {}
+}
+function renderPaceSetting() {
+    const pace = ssGetPace();
+    document.querySelectorAll('[data-pace]').forEach(b => {
+        const on = Math.abs(parseFloat(b.getAttribute('data-pace')) - pace) < 0.01;
+        b.classList.toggle('pace-on', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+}
+ssInitPace();
+
 function startArenaTimer(sec) {
     clearInterval(arenaTimerRef);
-    let rem = sec;
+    const pace = ssGetPace();
+    let rem = Math.max(5, Math.round(sec / pace));
     const disp = document.getElementById('quizTimerDisplay');
     if (!disp) return;
     disp.textContent = `⏱️ ${rem}s`;
@@ -2062,13 +2088,13 @@ function startArenaTimer(sec) {
             clearInterval(arenaTimerRef);
             StudioAudioManager.playSFX('wrong');
         }
-    }, 1000);
+    }, Math.max(300, Math.round(1000 / pace)));
 }
 
 function speakCurrentQuestion() {
     if (!('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
-    const qObj = (appState.questions || DEFAULT_QUESTIONS)[appState.qIndex];
+    const qObj = (appState.questions || [])[appState.qIndex];
     if (!qObj) return;
     const cleanText = qObj.q.replace(/\*\*/g, '').replace(/<[^>]*>/g, '');
     window.speechSynthesis.speak(new SpeechSynthesisUtterance(cleanText));
@@ -2392,7 +2418,12 @@ async function handleNewClassRosterUpload(event) {
         }
         names = names.map(n => n ? String(n).trim() : '').filter(n => n.length > 1);
         if (names.length > 0) {
-            const cName = prompt(`Found ${names.length} students! Enter Class Name:`, file.name.replace(/\.[^/.]+$/, ""));
+            const cName = await SSD.prompt(`Import ${names.length} students`, {
+                message: 'Name this new classroom:',
+                initial: file.name.replace(/\.[^/.]+$/, ''),
+                placeholder: 'e.g. 5C',
+                okLabel: 'Create classroom'
+            });
             if (cName && cName.trim()) {
                 appState.classes[cName.trim()] = names;
                 appState.currentClass = cName.trim();

@@ -1,6 +1,5 @@
 
 // ===== merged build: data layer, sync, admin (no real names / PINs / admins in this file) =====
-const SM_DEMO = { "DEMO CLASS": SCHOOL_CLASSES["DEMO CLASS"].slice() };
 Object.keys(SCHOOL_CLASSES).forEach(k => delete SCHOOL_CLASSES[k]);   // filled at runtime from the device data
 function smDBKey(){return smk7('SMART_PORTAL_GENERAL_DB');}
 const smNorm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -37,15 +36,13 @@ function smRebuildSchool() {
 }
 function getTeacherRoleTitle(n) { return ADMINS.includes(n) ? 'Administrator' : 'Subject Teacher'; }
 function populateAllSchoolClasses(tObj) {
-    const base = Date.now(); if (!tObj.classes) tObj.classes = {};
-    const demo = (currentTeacher === 'Teacher');
-    const src = demo ? SM_DEMO : { "My Class": [] };
-    Object.keys(src).forEach((c, ci) => { if (!tObj.classes[c]) tObj.classes[c] = { students: src[c].map((n, i) => ({ id: base + ci * 100 + i, name: n })), scores: {}, quizScores: {}, projectScores: {}, manualScores: {}, comments: {}, bulkCounts: {}, history: {} }; });
-    tObj.currentClass = Object.keys(tObj.classes)[0];
+    if (!tObj || typeof tObj !== 'object') return;
+    if (!tObj.classes) tObj.classes = {}; // never invent demo classes/students
+    tObj.currentClass = Object.keys(tObj.classes)[0] || '';
 }
 function smApplyRegistry(reg) {
     Object.keys(TEACHER_PINS).forEach(k => delete TEACHER_PINS[k]); ADMINS.length = 0; window.__smRoles = {};
-    Object.keys(reg || {}).forEach(n => { TEACHER_PINS[n] = reg[n].pin; DEFAULT_TEACHER_SUBJECTS[n] = reg[n].subject || 'Science'; window.__smRoles[n] = reg[n].role || 'teacher'; if (reg[n].role === 'admin') ADMINS.push(n); });
+    Object.keys(reg || {}).forEach(n => { TEACHER_PINS[n] = reg[n].pin; DEFAULT_TEACHER_SUBJECTS[n] = reg[n].subject || (ALL_SUBJECTS[0] || ''); window.__smRoles[n] = reg[n].role || 'teacher'; if (reg[n].role === 'admin') ADMINS.push(n); });
 }
 function smRegOp(o) { window.parent.postMessage(Object.assign({ t: 'registryOp' }, o), '*'); }
 function smDownload(name, text) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
@@ -107,7 +104,7 @@ async function smFullBackup() {
     try {
         const ls = {};
         smBackupKeys().forEach(k => { const v = localStorage.getItem(k); if (v !== null) ls[k] = smStripLsValue(v); });
-        let teachers = []; try { const t = JSON.parse(localStorage.getItem(smk7('SGE_SM_TEACHERS')) || '{}'); teachers = Object.keys(t).map(n => ({ name: n, subject: t[n].subject || 'Science', role: t[n].role || 'teacher' })); } catch (e) {}
+        let teachers = []; try { const t = JSON.parse(localStorage.getItem(smk7('SGE_SM_TEACHERS')) || '{}'); teachers = Object.keys(t).map(n => ({ name: n, subject: t[n].subject || (ALL_SUBJECTS[0] || ''), role: t[n].role || 'teacher' })); } catch (e) {}
         const deckRecs = await smIdbAllRecs(smk7('SGE_SS_DECKS_DB'), 'decks');
         const decks = []; for (const d of deckRecs) { if (!d || !d.id || !d.blob) continue; decks.push({ id: d.id, name: d.name || 'deck', mime: d.blob.type || 'application/octet-stream', b64: await smBlobToB64(d.blob) }); }
         const stateDb = await smIdbCursorKV(smk7('SGE_SS_STATE_DB'), 'kv');
@@ -137,13 +134,13 @@ async function smRestoreBackupText(text) {
     let deckBlobs; try { deckBlobs = pkg.decks.map(d => { const bin = atob(d.b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return { id: d.id, name: d.name || 'deck', blob: new Blob([u], { type: d.mime || 'application/octet-stream' }) }; }); } catch (e) { return alert('This backup file has damaged deck data. Nothing was changed.'); }
     const tcount = pkg.identity.teachers.length, dcount = deckBlobs.length;
     const hasData = smBackupKeys().some(k => localStorage.getItem(k) !== null) || (await smIdbAllRecs(smk7('SGE_SS_DECKS_DB'), 'decks')).length > 0;
-    if (!confirm('Restore the full backup from ' + (pkg.exportedAt || '?') + '?\nTeachers: ' + tcount + ', decks: ' + dcount + (hasData ? '\nCurrent data on this device will be replaced (a safety copy is kept first).' : '') + '\nPINs are never restored; each teacher sets a new PIN at sign-in.')) return;
-    if (hasData) { const okSnap = await smSafetySnapshot(); if (!okSnap && !confirm('Could not create the automatic safety copy (device storage may be full). Continue without it?')) return; }
+    if (!(await SSD.confirm('Restore backup?', 'Restore the full backup from ' + (pkg.exportedAt || '?') + '?\nTeachers: ' + tcount + ', decks: ' + dcount + (hasData ? '\nCurrent data on this device will be replaced (a safety copy is kept first).' : '') + '\nPINs are never restored; each teacher sets a new PIN at sign-in.', { okLabel: 'Restore backup', danger: !!hasData }))) return;
+    if (hasData) { const okSnap = await smSafetySnapshot(); if (!okSnap && !(await SSD.confirm('No safety copy', 'Could not create the automatic safety copy (device storage may be full).\nContinue without it?', { danger: true, okLabel: 'Continue anyway' }))) return; }
     let adminSkipped = 0;
     const prevRegistry = localStorage.getItem(smk7('SGE_SM_TEACHERS'));
     try {
         smBackupKeys().forEach(k => { if (Object.prototype.hasOwnProperty.call(pkg.localStorage, k)) localStorage.setItem(k, smStripLsValue(pkg.localStorage[k])); else localStorage.removeItem(k); });
-        try { const cur = JSON.parse(localStorage.getItem(smk7('SGE_SM_TEACHERS')) || '{}'); pkg.identity.teachers.forEach(t => { if (t.role === 'admin') { if (!cur[t.name]) adminSkipped++; return; } if (!cur[t.name]) cur[t.name] = { pin: null, subject: t.subject || 'Science', role: 'teacher' }; }); localStorage.setItem(smk7('SGE_SM_TEACHERS'), JSON.stringify(cur)); } catch (e) {}
+        try { const cur = JSON.parse(localStorage.getItem(smk7('SGE_SM_TEACHERS')) || '{}'); pkg.identity.teachers.forEach(t => { if (t.role === 'admin') { if (!cur[t.name]) adminSkipped++; return; } if (!cur[t.name]) cur[t.name] = { pin: null, subject: t.subject || (ALL_SUBJECTS[0] || ''), role: 'teacher' }; }); localStorage.setItem(smk7('SGE_SM_TEACHERS'), JSON.stringify(cur)); } catch (e) {}
         for (const d of deckBlobs) { if (!(await smIdbPut(smk7('SGE_SS_DECKS_DB'), 'decks', { id: d.id, name: d.name, blob: d.blob }))) throw new Error('a presentation could not be written (device storage may be full)'); }
         for (const rec of pkg.stateDb) { const vv = (rec.v && typeof rec.v === 'object') ? smDeepStripSecrets(JSON.parse(JSON.stringify(rec.v))) : rec.v; if (!(await smIdbPut(smk7('SGE_SS_STATE_DB'), 'kv', vv, rec.k))) throw new Error('app state could not be written (device storage may be full)'); }
     } catch (e) {
@@ -469,13 +466,13 @@ async function smServerLoad() {
                             st.ver = j.version || 0; st.base = smClone(j.data);
                             st.replay = true;
                         } catch (e) {
-                            globalData[currentTeacher] = j.data || { subject: DEFAULT_TEACHER_SUBJECTS[currentTeacher] || 'Science', currentClass: null, classes: {} };
+                            globalData[currentTeacher] = j.data || { subject: DEFAULT_TEACHER_SUBJECTS[currentTeacher] || (ALL_SUBJECTS[0] || ''), currentClass: null, classes: {} };
                             st.ver = j.version || 0; st.base = smClone(globalData[currentTeacher]);
                             st.blocked = true;
                         }
                     }
                 } else {
-                    globalData[currentTeacher] = j.data || { subject: DEFAULT_TEACHER_SUBJECTS[currentTeacher] || 'Science', currentClass: null, classes: {} };
+                    globalData[currentTeacher] = j.data || { subject: DEFAULT_TEACHER_SUBJECTS[currentTeacher] || (ALL_SUBJECTS[0] || ''), currentClass: null, classes: {} };
                     st.ver = j.version || 0; st.base = smClone(globalData[currentTeacher]);
                 }
                 appData = globalData[currentTeacher];
@@ -489,7 +486,7 @@ async function smServerLoad() {
             const r = await smApi(SM_SERVER + '/api/school/portal', { headers: { Authorization: 'Bearer ' + window.__smToken } });
             if (r.ok) { const j = await r.json(); const data = j.data || {};
                 Object.keys(data).forEach(n => { globalData[n] = data[n]; });
-                Object.keys(data).forEach(n => { if (!(n in TEACHER_PINS)) { TEACHER_PINS[n] = null; DEFAULT_TEACHER_SUBJECTS[n] = data[n].subject || 'Science'; } });
+                Object.keys(data).forEach(n => { if (!(n in TEACHER_PINS)) { TEACHER_PINS[n] = null; DEFAULT_TEACHER_SUBJECTS[n] = data[n].subject || (ALL_SUBJECTS[0] || ''); } });
                 if (!ADMINS.includes(currentTeacher)) ADMINS.push(currentTeacher);
                 try { setStore(smDBKey(), JSON.stringify(globalData)); } catch (e) {}
                 smRebuildSchool(); try { buildAutocompleteList(); } catch (e) {}
@@ -498,7 +495,17 @@ async function smServerLoad() {
         }
     } catch (e) { console.error('server load failed', e); }
 }
-function smAsk5(msg) { const v = (prompt(msg) || '').trim().replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)); if (!/^\d{5}$/.test(v)) { if (v) alert('PIN must be exactly 5 digits.'); return null; } return v; }
+async function smAsk5(msg) {
+    return await SSD.prompt('Security PIN', {
+        message: msg,
+        placeholder: '•••••',
+        type: 'password',
+        icon: '🔐',
+        okLabel: 'Set PIN',
+        hint: 'Exactly 5 digits',
+        validate: (v) => /^\d{5}$/.test(v.trim().replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))) ? null : 'PIN must be exactly 5 digits.'
+    });
+}
 
 /* ---------- sync with Studio (one shared roster) ---------- */
 function smSnap() { const c = {}; Object.keys(appData.classes).forEach(k => c[k] = appData.classes[k].students.map(s => s.name)); return { classes: c, cur: appData.currentClass }; }
@@ -573,7 +580,7 @@ function smExportRoster(name) {
     smDownload('roster-package_' + name.replace(/[^\w\-]+/g, '_') + '.json', JSON.stringify({ format: 'SMPKG1', type: 'roster', teacher: name, exportedAt: new Date().toISOString(), classes: c }));
 }
 function smPickPackage() { const f = document.getElementById('smPkgFile'); f.value = ''; f.onchange = () => { const file = f.files[0]; if (!file) return; const r = new FileReader(); r.onload = () => smOnPackage(String(r.result)); r.readAsText(file); }; f.click(); }
-function smOnPackage(text) {
+async function smOnPackage(text) {
     let pkg; try { pkg = JSON.parse(text); } catch (e) { return alert('This file is not a valid package.'); }
     if (!pkg || pkg.format !== 'SMPKG1') return alert('This file is not an Alforqan - Studio / Portal package.');
     const realUser = isAdminImpersonating ? adminRealName : currentTeacher, isAdm = ADMINS.includes(realUser);
@@ -582,13 +589,13 @@ function smOnPackage(text) {
         const d = pkg.data; if (!d || !d.classes || SMStore.countStudents(d) === 0) return alert('Package is empty. Nothing imported.');
         const name = String(pkg.teacher || '').trim(); if (!name || ADMINS.includes(name)) return alert('Invalid teacher name in package.');
         const msg = 'Import "' + name + '": ' + Object.keys(d.classes).length + ' classes, ' + SMStore.countStudents(d) + ' students, ' + SMStore.countAwards(d) + ' behavior actions.';
-        if (TEACHER_PINS[name]) { const cur = globalData[name]; if (!confirm(msg + '\n\nThis REPLACES the current data of this teacher on this device (' + SMStore.countStudents(cur) + ' students, ' + SMStore.countAwards(cur) + ' actions). A backup is kept. Continue?')) return; }
+        if (TEACHER_PINS[name]) { const cur = globalData[name]; if (!(await SSD.confirm('Replace teacher data?', msg + '\n\nThis REPLACES the current data of this teacher on this device (' + SMStore.countStudents(cur) + ' students, ' + SMStore.countAwards(cur) + ' actions). A backup is kept.', { okLabel: 'Replace data', danger: true }))) return; }
         else {
-            if (!confirm(msg + '\n\nThis teacher is not on this device yet. Add them?')) return;
-            const pin = smAsk5('Set a 5-digit PIN for ' + name + ':'); if (!pin) return;
-            TEACHER_PINS[name] = pin; DEFAULT_TEACHER_SUBJECTS[name] = pkg.subject || d.subject || 'Science'; smRegOp({ op: 'add', name: name, pin: pin, subject: pkg.subject || d.subject || 'Science', role: 'teacher' });
+            if (!(await SSD.confirm('Add teacher?', msg + '\n\nThis teacher is not on this device yet. Add them?', { okLabel: 'Add teacher' }))) return;
+            const pin = await smAsk5('Set a 5-digit PIN for ' + name + ':'); if (!pin) return;
+            TEACHER_PINS[name] = pin; DEFAULT_TEACHER_SUBJECTS[name] = pkg.subject || d.subject || (ALL_SUBJECTS[0] || ''); smRegOp({ op: 'add', name: name, pin: pin, subject: pkg.subject || d.subject || (ALL_SUBJECTS[0] || ''), role: 'teacher' });
         }
-        SMStore.backup('BEFORE_IMPORT'); d._v = (d._v || 0) + 1; d._updatedAt = new Date().toISOString(); d.subject = pkg.subject || d.subject || 'Science';
+        SMStore.backup('BEFORE_IMPORT'); d._v = (d._v || 0) + 1; d._updatedAt = new Date().toISOString(); d.subject = pkg.subject || d.subject || (ALL_SUBJECTS[0] || '');
         globalData[name] = d; SMStore.saveAll(); smRebuildSchool(); openAdminDashboard(); showToast('Imported ' + name);
     } else if (pkg.type === 'roster') {
         if (isAdm) return alert('Roster packages are for teachers. Open it in the teacher account.');
@@ -603,41 +610,46 @@ function smOnPackage(text) {
         saveGlobal(); smRefresh(); alert('Roster imported: ' + ac + ' new classes, ' + as + ' new students. Nothing was removed.');
     } else alert('Unknown package type.');
 }
-function smAddTeacher() {
-    const name = (prompt('Name for the new account:') || '').trim(); if (!name) return; if (TEACHER_PINS[name]) return alert('This name already exists.');
-    let role = (prompt('Role: teacher or counselor', 'teacher') || 'teacher').trim().toLowerCase();
+async function smAddTeacher() {
+    const name = await SSD.prompt('New account', { message: 'Full name of the new staff member:', placeholder: 'e.g. Amal Ahmed', okLabel: 'Next' });
+    if (!name) return; if (TEACHER_PINS[name]) return alert('This name already exists.');
+    let role = (await SSD.prompt('Account role', { message: 'teacher or counselor?', initial: 'teacher', okLabel: 'Next' }) || 'teacher').trim().toLowerCase();
     if (!['teacher', 'counselor'].includes(role)) role = 'teacher';
-    const pin = smAsk5('Choose a 5-digit PIN for ' + name + ':'); if (!pin) return;
+    const pin = await smAsk5('Choose a 5-digit PIN for ' + name + ':'); if (!pin) return;
     let subj = 'Administration';
-    if (role === 'teacher') { subj = (prompt('Subject (' + ALL_SUBJECTS.join(', ') + '):', 'Science') || 'Science').trim(); if (!ALL_SUBJECTS.includes(subj)) subj = 'Science'; }
+    if (role === 'teacher') { subj = (await SSD.prompt('Subject', { message: 'Teaching subject:', initial: ALL_SUBJECTS[0] || '', okLabel: 'Create account', hint: 'Choose from: ' + ALL_SUBJECTS.join(', ') }) || (ALL_SUBJECTS[0] || '')).trim(); if (!ALL_SUBJECTS.includes(subj)) subj = ''; }
     if (role === 'counselor') subj = 'Counseling';
     TEACHER_PINS[name] = pin; DEFAULT_TEACHER_SUBJECTS[name] = subj; if (role === 'admin') ADMINS.push(name);
     window.__smRoles = window.__smRoles || {}; window.__smRoles[name] = role;
     smRegOp({ op: 'add', name: name, pin: pin, subject: subj, role: role }); openAdminDashboard(); showToast('Added ' + name + ' (' + role + ').');
 }
-function smRemoveTeacher(name) {
+async function smRemoveTeacher(name) {
     if (name === currentTeacher || name === adminRealName) return alert('You cannot remove the account you are signed in with.');
     const t = globalData[name];
-    if (!confirm('Remove teacher "' + name + '" and all their classes and records on this device?\n(' + SMStore.countStudents(t) + ' students, ' + SMStore.countAwards(t) + ' actions). A backup copy is kept.')) return;
+    if (!(await SSD.confirm('Remove account', 'Remove "' + name + '" and all their classes and records on this device?\n(' + SMStore.countStudents(t) + ' students, ' + SMStore.countAwards(t) + ' actions). A backup copy is kept.', { danger: true, okLabel: 'Remove teacher' }))) return;
     SMStore.backup('BEFORE_REMOVE'); delete globalData[name]; delete TEACHER_PINS[name]; SMStore.saveAll(); smRegOp({ op: 'remove', name: name }); smRebuildSchool(); openAdminDashboard(); showToast('Removed ' + name, true);
 }
-function smAdminAddClass(tName) {
-    const c = (prompt('New class name for ' + tName + ' (e.g. 5C):') || '').trim(); if (!c) return;
-    const t = globalData[tName] || (globalData[tName] = { subject: DEFAULT_TEACHER_SUBJECTS[tName] || 'Science', classes: {}, currentClass: '' });
+async function smAdminAddClass(tName) {
+    const rosterCls = (window.SM_ROSTER && window.SM_ROSTER.classes) || [];
+    const notAssigned = rosterCls.filter(rc => !Object.keys((globalData[tName] || {}).classes || {}).includes(rc));
+    const c = await SSD.prompt('New class for ' + tName, { message: 'Class name:', placeholder: 'e.g. 5C', okLabel: 'Add class', hint: notAssigned.length ? 'Official classes not yet assigned: ' + notAssigned.join(', ') : undefined });
+    if (!c) return;
+    const t = globalData[tName] || (globalData[tName] = { subject: DEFAULT_TEACHER_SUBJECTS[tName] || (ALL_SUBJECTS[0] || ''), classes: {}, currentClass: '' });
     t.classes = t.classes || {};
     if (t.classes[c]) return alert('This class already exists for ' + tName + '.');
     t.classes[c] = { students: [], scores: {}, quizScores: {}, projectScores: {}, manualScores: {}, comments: {}, bulkCounts: {}, history: {} };
     smRegOp({ op: 'addClass', teacher: tName, className: c }); openAdminDashboard(); showToast('Class ' + c + ' added for ' + tName + ' - it syncs to their account.');
 }
-function smAdminSetSubject(tName) {
-    const cur = (globalData[tName] && globalData[tName].subject) || DEFAULT_TEACHER_SUBJECTS[tName] || 'Science';
-    const subj = (prompt('Subject for ' + tName + ' (' + ALL_SUBJECTS.join(', ') + '):', cur) || '').trim(); if (!subj) return;
+async function smAdminSetSubject(tName) {
+    const cur = (globalData[tName] && globalData[tName].subject) || DEFAULT_TEACHER_SUBJECTS[tName] || ALL_SUBJECTS[0] || '';
+    const subj = await SSD.prompt('Subject — ' + tName, { message: 'Teaching subject:', initial: cur, okLabel: 'Save subject', hint: 'Choose from: ' + ALL_SUBJECTS.join(', ') });
+    if (!subj) return;
     if (!ALL_SUBJECTS.includes(subj)) return alert('Unknown subject. Choose from: ' + ALL_SUBJECTS.join(', '));
     DEFAULT_TEACHER_SUBJECTS[tName] = subj; if (globalData[tName]) globalData[tName].subject = subj;
     smRegOp({ op: 'setSubject', name: tName, subject: subj }); openAdminDashboard(); showToast('Subject set for ' + tName + '.');
 }
-function smAdminResetPin(tName) {
-    const pin = smAsk5('New 5-digit PIN for ' + tName + ':'); if (!pin) return;
+async function smAdminResetPin(tName) {
+    const pin = await smAsk5('New 5-digit PIN for ' + tName + ':'); if (!pin) return;
     smRegOp({ op: 'resetPin', name: tName, pin: pin }); showToast('PIN reset for ' + tName + '. Their old sessions are signed out.');
 }
 function smNavExtras(nav) {
